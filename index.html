@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>かたちあわせクイズ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;800;900&display=swap" rel="stylesheet">
+  <!-- Three.js Library & OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    * {
+      font-family: 'M PLUS Rounded 1c', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    ruby rt {
+      font-size: 0.65em;
+      color: #0284c7;
+      font-weight: bold;
+    }
+    .quiz-card {
+      background: #ffffff;
+      border-radius: 28px;
+      box-shadow: 0 12px 30px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+    }
+    .btn-bounce {
+      transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s ease;
+    }
+    .btn-bounce:active {
+      transform: scale(0.95);
+    }
+    @keyframes popIn {
+      0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+      70% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    }
+    .animate-pop {
+      animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+    canvas {
+      cursor: grab;
+      touch-action: none;
+    }
+    canvas:active {
+      cursor: grabbing;
+    }
+  </style>
+</head>
+<body class="bg-amber-50 min-h-screen flex flex-col items-center justify-between p-3 sm:p-6 text-slate-800 select-none overflow-x-hidden">
+
+  <!-- ヘッダー -->
+  <header class="w-full max-w-md flex justify-between items-center mb-2">
+    <h1 class="text-2xl sm:text-3xl font-black text-amber-600 tracking-wide flex items-center gap-1.5 drop-shadow-sm">
+      <span class="text-3xl">🧩</span>
+      <span><ruby>形<rt>かたち</rt></ruby>あわせクイズ</span>
+    </h1>
+    <div class="bg-white border-2 border-amber-300 rounded-full px-4 py-1 shadow-sm flex items-center gap-2">
+      <span class="text-amber-500 font-bold text-sm sm:text-base"><ruby>点数<rt>てんすう</rt></ruby>:</span>
+      <span id="score" class="text-2xl font-black text-amber-600">0</span>
+    </div>
+  </header>
+
+  <!-- メインカード -->
+  <main class="w-full max-w-md quiz-card p-4 sm:p-6 border-4 border-amber-200 flex flex-col items-center relative my-auto">
+    
+    <!-- 正誤判定ポップアップ -->
+    <div id="feedback" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none opacity-0 flex flex-col items-center justify-center w-full">
+      <div id="feedbackIcon" class="text-8xl sm:text-9xl font-black drop-shadow-2xl"></div>
+      <div id="feedbackText" class="text-2xl sm:text-3xl font-black bg-white px-8 py-3 rounded-full border-4 shadow-2xl mt-2"></div>
+    </div>
+
+    <!-- 問いかけメッセージ -->
+    <div class="text-base sm:text-lg font-bold text-slate-700 text-center mb-3 bg-amber-100/80 w-full py-2.5 px-3 rounded-2xl border border-amber-200">
+      これと <ruby>同<rt>おな</rt></ruby>じ <ruby>仲間<rt>なかま</rt></ruby>は どれかな？
+    </div>
+
+    <!-- 出題3D WebGL表示領域（ドラッグ・タッチで自由回転可能） -->
+    <div id="questionCanvasContainer" class="relative w-48 h-48 sm:w-56 sm:h-56 bg-gradient-to-b from-sky-50 to-blue-100/60 rounded-2xl border-4 border-dashed border-sky-300 shadow-inner mb-4 overflow-hidden flex items-center justify-center">
+    </div>
+
+    <!-- 選択肢 2x2 グリッド (すべて3Dでドラッグ回転可能) -->
+    <div class="grid grid-cols-2 gap-3 sm:gap-4 w-full" id="optionsContainer">
+    </div>
+
+    <!-- つぎの問題ボタン -->
+    <button id="nextBtn" onclick="generateQuestion()" class="hidden mt-4 w-full py-3 bg-gradient-to-r from-emerald-400 to-green-500 hover:from-emerald-500 hover:to-green-600 text-white text-lg sm:text-xl font-black rounded-2xl shadow-lg border-b-4 border-green-700 btn-bounce flex items-center justify-center gap-2 z-20">
+      <span>つぎの もんだい</span>
+      <span class="text-2xl">➔</span>
+    </button>
+  </main>
+
+  <!-- フッター -->
+  <footer class="mt-2 text-center text-xs font-bold text-amber-700/70">
+    <ruby>小学<rt>しょうがく</rt></ruby>1<ruby>年生<rt>ねんせい</rt></ruby>の <ruby>算数<rt>さんすう</rt></ruby>「かたちあそび」
+  </footer>
+
+  <script>
+    // 立体カテゴリー
+    const SHAPE_KEYS = ['CYLINDER', 'CUBOID', 'CUBE', 'SPHERE'];
+
+    // 面の鮮やかなテーマカラー
+    const SHAPE_COLORS = [
+      0x60a5fa, // 明るいブルー
+      0xf97316, // 明るいオレンジ
+      0x34d399, // エメラルド
+      0xc084fc, // パープル
+      0xf472b6, // ピンク
+      0xfacc15  // イエロー
+    ];
+
+    let currentTargetShape = '';
+    let score = 0;
+    let isAnswering = true;
+
+    // Web Audio API によるサウンド演出
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+
+    function playSound(type) {
+      try {
+        if (!audioCtx) audioCtx = new AudioCtx();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+
+        if (type === 'correct') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(523.25, now);       // C5
+          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+          gain.gain.setValueAtTime(0.25, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc.start(now);
+          osc.stop(now + 0.45);
+        } else if (type === 'wrong') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(180, now);
+          osc.frequency.setValueAtTime(130, now + 0.12);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+          osc.start(now);
+          osc.stop(now + 0.35);
+        }
+      } catch (e) {}
+    }
+
+    // メイン問題用 Three.js セットアップ
+    let qScene, qCamera, qRenderer, qControls, qMeshGroup;
+
+    function initMainCanvas() {
+      const container = document.getElementById('questionCanvasContainer');
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+
+      qScene = new THREE.Scene();
+
+      qCamera = new THREE.PerspectiveCamera(40, w / h, 0.1, 100);
+      qCamera.position.set(0, 2.2, 6.2);
+
+      qRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      qRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      qRenderer.setSize(w, h);
+      container.appendChild(qRenderer.domElement);
+
+      // ライティング
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+      qScene.add(ambientLight);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight1.position.set(5, 8, 5);
+      qScene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0xb0e0e6, 0.4);
+      dirLight2.position.set(-5, -3, -3);
+      qScene.add(dirLight2);
+
+      // OrbitControls (手動ドラッグ回転)
+      qControls = new THREE.OrbitControls(qCamera, qRenderer.domElement);
+      qControls.enableDamping = true;
+      qControls.dampingFactor = 0.1;
+      qControls.enableZoom = false;
+      qControls.enablePan = false;
+      qControls.autoRotate = false;
+
+      qMeshGroup = new THREE.Group();
+      qScene.add(qMeshGroup);
+    }
+
+    /**
+     * 3D立体＋はっきりした輪郭線（辺）の生成関数
+     */
+    function createShapeObject(shapeType) {
+      const group = new THREE.Group();
+      let geometry;
+      const fillColor = SHAPE_COLORS[Math.floor(Math.random() * SHAPE_COLORS.length)];
+
+      if (shapeType === 'CUBE') { // 立方体
+        const s = 1.15;
+        geometry = new THREE.BoxGeometry(s, s, s);
+
+      } else if (shapeType === 'CUBOID') { // 直方体
+        const subtype = Math.floor(Math.random() * 3);
+        if (subtype === 0) { // 縦長
+          geometry = new THREE.BoxGeometry(0.75, 1.4, 0.75);
+        } else if (subtype === 1) { // 横長
+          geometry = new THREE.BoxGeometry(1.4, 0.65, 0.85);
+        } else { // 奥行き長
+          geometry = new THREE.BoxGeometry(0.8, 0.8, 1.4);
+        }
+
+      } else if (shapeType === 'CYLINDER') { // 円柱
+        const cylinderType = Math.floor(Math.random() * 3);
+        if (cylinderType === 0) { // 薄い円柱（コイン・フタ型）
+          geometry = new THREE.CylinderGeometry(0.9, 0.9, 0.35, 48);
+        } else if (cylinderType === 1) { // 背の高い円柱（缶・水筒型）
+          geometry = new THREE.CylinderGeometry(0.52, 0.52, 1.4, 48);
+        } else { // 標準的な円柱
+          geometry = new THREE.CylinderGeometry(0.7, 0.7, 1.0, 48);
+        }
+
+      } else if (shapeType === 'SPHERE') { // 球
+        geometry = new THREE.SphereGeometry(0.75, 32, 32);
+      }
+
+      // 面（ソリッド）のマテリアル
+      const faceMaterial = new THREE.MeshToonMaterial({
+        color: fillColor,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+      });
+      const mesh = new THREE.Mesh(geometry, faceMaterial);
+      group.add(mesh);
+
+      // 辺（へん）を鮮明にするダークカラーの太い輪郭線（EdgesGeometry）
+      if (shapeType === 'SPHERE') {
+        const edges = new THREE.EdgesGeometry(geometry, 25);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x1e293b, linewidth: 3 });
+        const lineSegments = new THREE.LineSegments(edges, lineMaterial);
+        group.add(lineSegments);
+      } else if (shapeType === 'CYLINDER') {
+        const edges = new THREE.EdgesGeometry(geometry, 45);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0f172a, linewidth: 3 });
+        const lineSegments = new THREE.LineSegments(edges, lineMaterial);
+        group.add(lineSegments);
+      } else {
+        const edges = new THREE.EdgesGeometry(geometry);
+        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x0f172a, linewidth: 3 });
+        const lineSegments = new THREE.LineSegments(edges, lineMaterial);
+        group.add(lineSegments);
+      }
+
+      return group;
+    }
+
+    // 選択肢カード（インタラクティブ3Dキャンバス）の配列
+    const optionObjects = [];
+
+    function createOptionCard(shapeType, container) {
+      const card = document.createElement('div');
+      card.dataset.shape = shapeType;
+      card.className = `option-card relative w-full aspect-square bg-white border-4 border-slate-200 hover:border-sky-400 hover:bg-sky-50/50 rounded-2xl flex flex-col items-center justify-between transition-all duration-150 shadow-sm hover:shadow-md overflow-hidden p-1.5`;
+
+      // 3D Canvas
+      const optCanvas = document.createElement('canvas');
+      optCanvas.className = 'w-full h-full block rounded-xl';
+      card.appendChild(optCanvas);
+
+      // 「これにする」回答決定ボタン（ドラッグ操作と選択操作を明確に区別）
+      const selectBtn = document.createElement('button');
+      selectBtn.className = 'select-act-btn absolute bottom-2 left-1/2 -translate-x-1/2 w-11/12 py-1.5 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-transform border-b-2 border-sky-700 z-10 flex items-center justify-center gap-1';
+      selectBtn.innerHTML = `<span>えらぶ</span>`;
+      card.appendChild(selectBtn);
+
+      container.appendChild(card);
+
+      // ミニThree.jsシーン
+      const scene = new THREE.Scene();
+      
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+      camera.position.set(0, 0.2, 5.0);
+      camera.lookAt(0, 0, 0);
+
+      const renderer = new THREE.WebGLRenderer({ canvas: optCanvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+      // 選択肢ごとのドラッグ回転コントローラー (OrbitControls)
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.12;
+      controls.enableZoom = false;
+      controls.enablePan = false;
+      controls.autoRotate = false;
+
+      // ライティング
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+      scene.add(ambientLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.75);
+      dirLight.position.set(4, 6, 4);
+      scene.add(dirLight);
+
+      // 3D立体オブジェクトの生成
+      const shapeObj = createShapeObject(shapeType);
+      scene.add(shapeObj);
+
+      shapeObj.position.set(0, 0, 0);
+
+      optionObjects.push({
+        renderer,
+        scene,
+        camera,
+        controls,
+        shapeObj,
+        card,
+        selectBtn,
+        shapeType
+      });
+
+      // 回答決定イベント
+      selectBtn.onclick = (e) => {
+        e.stopPropagation();
+        checkAnswer(shapeType, card);
+      };
+
+      // カード自体をタップした場合でも回答選択
+      card.onclick = (e) => {
+        // コントローラーでのドラッグ操作直後はクリック発火を防止
+        if (controls.state !== -1) return;
+        checkAnswer(shapeType, card);
+      };
+    }
+
+    // 全アニメーション・描画ループ
+    function mainRenderLoop() {
+      requestAnimationFrame(mainRenderLoop);
+
+      // メイン問題の更新
+      if (qControls) qControls.update();
+      if (qRenderer && qScene && qCamera) {
+        qRenderer.render(qScene, qCamera);
+      }
+
+      // 4つの選択肢3Dシーンの個別更新＆レンダリング
+      optionObjects.forEach(opt => {
+        if (opt.controls) opt.controls.update();
+        const w = opt.card.clientWidth || 120;
+        const h = opt.card.clientHeight || 120;
+        opt.renderer.setSize(w, h, false);
+        opt.renderer.render(opt.scene, opt.camera);
+      });
+    }
+
+    // 配列シャッフル
+    function shuffle(arr) {
+      return [...arr].sort(() => Math.random() - 0.5);
+    }
+
+    // 問題生成
+    function generateQuestion() {
+      isAnswering = true;
+      document.getElementById('nextBtn').classList.add('hidden');
+
+      const feedback = document.getElementById('feedback');
+      feedback.classList.remove('animate-pop');
+      feedback.style.opacity = '0';
+
+      // ターゲット選択
+      currentTargetShape = SHAPE_KEYS[Math.floor(Math.random() * SHAPE_KEYS.length)];
+
+      // メインの立体をクリア
+      while (qMeshGroup.children.length > 0) {
+        const obj = qMeshGroup.children[0];
+        qMeshGroup.remove(obj);
+      }
+
+      // メイン立体の作成
+      const qShapeObj = createShapeObject(currentTargetShape);
+      qMeshGroup.add(qShapeObj);
+
+      // カメラ位置リセット
+      qCamera.position.set(0, 2.2, 6.2);
+      qControls.reset();
+
+      // 4つの選択肢作成
+      optionObjects.length = 0;
+      const container = document.getElementById('optionsContainer');
+      container.innerHTML = '';
+
+      const shuffledKeys = shuffle(SHAPE_KEYS);
+      shuffledKeys.forEach(key => {
+        createOptionCard(key, container);
+      });
+    }
+
+    // 正誤チェック
+    function checkAnswer(selectedKey, clickedCard) {
+      if (!isAnswering) return;
+      isAnswering = false;
+
+      const feedback = document.getElementById('feedback');
+      const feedbackIcon = document.getElementById('feedbackIcon');
+      const feedbackText = document.getElementById('feedbackText');
+
+      optionObjects.forEach(opt => {
+        if (opt.controls) opt.controls.enabled = false; // 回答後は操作不可に
+        opt.selectBtn.disabled = true;
+        opt.selectBtn.classList.add('opacity-50', 'pointer-events-none');
+      });
+
+      if (selectedKey === currentTargetShape) {
+        playSound('correct');
+        clickedCard.classList.remove('border-slate-200', 'hover:border-sky-400');
+        clickedCard.classList.add('border-emerald-500', 'bg-emerald-50', 'ring-4', 'ring-emerald-200');
+
+        feedbackIcon.innerText = '⭕';
+        feedbackText.innerText = 'せいかい！';
+        feedbackText.className = 'text-2xl sm:text-3xl font-black bg-white text-emerald-600 px-8 py-2 rounded-full border-4 border-emerald-400 shadow-2xl mt-2';
+
+        score += 10;
+        document.getElementById('score').innerText = score;
+
+      } else {
+        playSound('wrong');
+        clickedCard.classList.remove('border-slate-200', 'hover:border-sky-400');
+        clickedCard.classList.add('border-rose-500', 'bg-rose-50');
+
+        optionObjects.forEach(opt => {
+          if (opt.shapeType === currentTargetShape) {
+            opt.card.classList.add('border-emerald-500', 'bg-emerald-50', 'ring-4', 'ring-emerald-200');
+          }
+        });
+
+        feedbackIcon.innerText = '❌';
+        feedbackText.innerText = 'ざんねん！';
+        feedbackText.className = 'text-2xl sm:text-3xl font-black bg-white text-rose-600 px-8 py-2 rounded-full border-4 border-rose-400 shadow-2xl mt-2';
+      }
+
+      feedback.classList.add('animate-pop');
+      document.getElementById('nextBtn').classList.remove('hidden');
+    }
+
+    // 初期化
+    window.onload = () => {
+      initMainCanvas();
+      generateQuestion();
+      mainRenderLoop();
+    };
+
+    // ウィンドウリサイズ対応
+    window.onresize = () => {
+      if (qRenderer && qCamera) {
+        const container = document.getElementById('questionCanvasContainer');
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        qCamera.aspect = w / h;
+        qCamera.updateProjectionMatrix();
+        qRenderer.setSize(w, h);
+      }
+    };
+  </script>
+</body>
+</html>
